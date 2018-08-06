@@ -242,3 +242,4 @@ COPY root/ /
 # ports and volumes
 EXPOSE 9981 9982
 VOLUME /config /recordings
+
