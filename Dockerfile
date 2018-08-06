@@ -148,7 +148,7 @@ RUN \
  echo "**** build tvheadend ****" && \
  git clone https://github.com/tvheadend/tvheadend.git /tmp/tvheadend && \
  cd /tmp/tvheadend && \
- patch -p1 < /tmp/patches/descrambler.patch
+ patch -p1 < /tmp/patches/descrambler.patch && \
  ./configure \
 	`#Encoding` \
 	--disable-ffmpeg_static \
