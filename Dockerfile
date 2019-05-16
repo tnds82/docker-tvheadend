@@ -1,12 +1,13 @@
-FROM lsiobase/alpine:3.8 as buildstage
+FROM lsiobase/alpine:3.9 as buildstage
 ############## build stage ##############
 
 # package versions
 ARG ARGTABLE_VER="2.13"
-ARG XMLTV_VER="0.5.69"
+ARG XMLTV_VER="v0.6.1"
 
 # environment settings
 ARG TZ="Europe/Oslo"
+ARG TVHEADEND_COMMIT
 ENV HOME="/config"
 
 # copy patches
@@ -29,6 +30,7 @@ RUN \
 	gettext-dev \
 	git \
 	gzip \
+	jq \
 	libcurl \
 	libdvbcsa-dev \
 	libgcrypt-dev \
@@ -76,6 +78,7 @@ RUN \
 	perl-lingua-en-numbers-ordinate \
 	perl-lingua-preferred \
 	perl-list-moreutils \
+	perl-lwp-useragent-determined \
 	perl-module-build \
 	perl-module-pluggable \
 	perl-net-ssleay \
@@ -107,7 +110,7 @@ RUN \
 	x265-dev \
 	zlib-dev && \
  apk add --no-cache \
-	--repository http://nl.alpinelinux.org/alpine/edge/testing \
+	--repository http://dl-cdn.alpinelinux.org/alpine/edge/community \
 	gnu-libiconv-dev
 
 RUN \
@@ -117,18 +120,14 @@ RUN \
 
 RUN \
  echo "**** install perl modules for xmltv ****" && \
- curl -L http://cpanmin.us | perl - App::cpanminus && \
+ curl -L https://cpanmin.us | perl - App::cpanminus && \
  cpanm --installdeps /tmp/patches
 
 RUN \
  echo "**** compile XMLTV ****" && \
- curl -o \
- /tmp/xmtltv-src.tar.bz2 -L \
-	"https://sourceforge.net/projects/xmltv/files/xmltv/${XMLTV_VER}/xmltv-${XMLTV_VER}.tar.bz2" && \
- tar xf \
- /tmp/xmtltv-src.tar.bz2 -C \
-	/tmp --strip-components=1 && \
- cd "/tmp/xmltv-${XMLTV_VER}" && \
+ git clone https://github.com/XMLTV/xmltv.git /tmp/xmltv && \
+ cd /tmp/xmltv && \
+ git checkout ${XMLTV_VER} && \
  echo "**** Perl 5.26 fixes for XMTLV ****" && \
  sed "s/use POSIX 'tmpnam';//" -i filter/tv_to_latex && \
  sed "s/use POSIX 'tmpnam';//" -i filter/tv_to_text && \
@@ -138,14 +137,21 @@ RUN \
  sed "s/\(lib\/Ask\/Term.pm';\)/.\/\1/" -i Makefile.PL && \
  PERL5LIB=`pwd` && \
  echo -e "yes" | perl Makefile.PL PREFIX=/usr/ INSTALLDIRS=vendor && \
- make && \
+ make -j 2 && \
  make test && \
  make DESTDIR=/tmp/xmltv-build install
 
 RUN \
  echo "**** compile tvheadend ****" && \
+ if [ -z ${TVHEADEND_COMMIT+x} ]; then \
+	TVHEADEND_COMMIT=$(curl -sX GET https://api.github.com/repos/tvheadend/tvheadend/commits/master \
+	| jq -r '. | .sha'); \
+ fi && \
+ mkdir -p \
+	/tmp/tvheadend && \
  git clone https://github.com/tvheadend/tvheadend.git /tmp/tvheadend && \
  cd /tmp/tvheadend && \
+ git checkout ${TVHEADEND_COMMIT} && \
  patch -p1 < /tmp/patches/descrambler.patch && \
  ./configure \
 	`#Encoding` \
@@ -179,7 +185,7 @@ RUN \
 	--mandir=/usr/share/man \
 	--prefix=/usr \
 	--sysconfdir=/config && \
- make && \
+ make -j 2 && \
  make DESTDIR=/tmp/tvheadend-build install
 
 RUN \
@@ -197,7 +203,7 @@ RUN \
  cd /tmp/argtable && \
  ./configure \
 	--prefix=/usr && \
- make && \
+ make -j 2 && \
  make check && \
  make DESTDIR=/tmp/argtable-build install && \
  echo "**** copy to /usr for comskip dependency ****" && \
@@ -211,11 +217,11 @@ RUN \
  ./configure \
 	--bindir=/usr/bin \
 	--sysconfdir=/config/comskip && \
- make && \
+ make -j 2 && \
  make DESTDIR=/tmp/comskip-build install
 
 ############## runtime stage ##############
-FROM lsiobase/alpine:3.8
+FROM lsiobase/alpine:3.9
 
 # set version label
 ARG BUILD_DATE
@@ -235,11 +241,11 @@ RUN \
 	ffmpeg \
 	ffmpeg-libs \
 	gzip \
-	libcrypto1.0 \
+	libcrypto1.1 \
 	libcurl \
 	libdvbcsa \
 	libhdhomerun-libs \
-	libssl1.0 \
+	libssl1.1 \
 	libva \
 	libva-intel-driver \
 	libvpx \
@@ -281,6 +287,7 @@ RUN \
 	perl-lingua-en-numbers-ordinate \
 	perl-lingua-preferred \
 	perl-list-moreutils \
+	perl-lwp-useragent-determined \
 	perl-module-build \
 	perl-module-pluggable \
 	perl-net-ssleay \
@@ -309,8 +316,13 @@ RUN \
 	x265 \
 	zlib && \
  apk add --no-cache \
-	--repository http://nl.alpinelinux.org/alpine/edge/testing \
-	gnu-libiconv
+	--repository http://dl-cdn.alpinelinux.org/alpine/edge/community \
+	gnu-libiconv && \
+ echo "**** Add Picons ****" && \
+ mkdir -p /picons && \
+ curl -o \
+        /picons.tar.bz2 -L \
+        https://lsio-ci.ams3.digitaloceanspaces.com/picons/picons.tar.bz2
 
 # copy local files and buildstage artifacts
 COPY --from=buildstage /tmp/argtable-build/usr/ /usr/
@@ -324,5 +336,3 @@ COPY root/ /
 # ports and volumes
 EXPOSE 9981 9982
 VOLUME /config /recordings
-
-
